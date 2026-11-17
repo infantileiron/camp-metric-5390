@@ -6,7 +6,7 @@
 
 启航训练营经营分析组服务四个线上/线下班级，每天收到班主任的 `启航_班级日报_20261115.xlsx`。原流程由分析员在工作簿计算实到率、结课达成率、退款占比，再把数字抄入经营会纪要。痛点是分子分母的过滤范围不一致、修改公式后旧结论失去依据、数据更正与口径变化无法分清。本项目接收上游班级日事实，替代口径登记/试算/差异解释，给下游经营负责人提供冻结依据。
 
-三个业务实体：指标定义Metric（代码+版本唯一）、班级日事实Fact（班级+日期唯一）、试算签核快照Snapshot。四页是口径目录、事实校验、口径试算和签核历史；另有登录。后台worker真实计算，签核锁定口径与意见，后续事实修改不改变历史快照。
+三个业务实体：指标定义Metric（代码+版本唯一）、班级日事实Fact（班级+日期唯一）、试算签核快照Snapshot；另加签核快照的公开发布台账Publication/PublicationItem。五页是口径目录、事实校验、口径试算、签核历史和公开发布；另有登录。后台worker真实计算，签核锁定口径与意见，后续事实修改不改变历史快照。
 
 |角色|权限|典型动作|
 |---|---|---|
@@ -35,6 +35,8 @@ docker compose exec -T backend python -m scripts.seed_demo
 6. 09:40 新建v2试算，选择v1成功快照作为基线，核对比值差异、变更字段、日期窗和事实checksum。
 7. 10:00 在签核历史填写不少于8字的解释，说明是否同时存在事实变化。
 8. 10:10 admin签核；该版本不可覆盖。10:20 viewer下载 `camp-metric-<id>.json`。
+9. 10:30 admin在公开发布页对已签核快照预检两个组合，确认各班可行范围后提交待检包。
+10. 10:40 发布待检包；公开页只显示组合名称与合计，viewer可下载 `camp-publication-<id>.json`。若之后追加的组合会让小班被反推出，发布会重新联审并整包拒发并指出泄露组合。
 
 ## 指标计算与安全白名单
 
@@ -45,6 +47,16 @@ docker compose exec -T backend python -m scripts.seed_demo
 外层总分母为0，value=null并显示undefined，不伪装0，可导出诊断但禁止签核。没有事实、非法行表达式使任务failed，修正后重新试算。每次冻结口径、事实、基线、日期窗及checksum。版本比较仅允许同指标代码，显示字段变化、绝对比值差和日期/事实是否一致；数据改变时不能把全部差异归因于口径。
 
 签核需要已成功、非undefined、业务解释至少8字且口径仍与试算一致；试算后修订口径必须重算。签核后锁定口径版本和意见，事实更正不改旧快照。已有冻结版本可再次以新事实试算，但仍保留各次输入。
+
+## 公开发布台账与反推防护
+
+经营简报只公开多个班级组合的结课总人次，不公开单班人数。管理页（admin）对已签核快照编制待检发布包，逐条填写组合名称与班级代码；服务端按该快照**冻结事实**按班聚合结课人次，组合合计只由服务端计算，不信任前端提交。
+
+反推检查把每个班级人数视为 `0 ≤ x_i ≤ 该班实到人次` 的非负整数，把本次包与**该快照历次已公开合计**（含已撤下，不含草稿与待检）一起作为 `Σx_i = 合计` 约束，精确求每个班级的整数可行范围（有理数消元 + 同余剪枝的分支搜索，与穷举逐一对照，不做会把整数间隙放大的线性松弛）。任一结课不足 5 人的班级，只要被披露组合覆盖且范围宽度（最大值−最小值）小于 3，就整包拒发，并在原因中列出造成收窄的泄露组合（含相减才能定位时需要的对照组合）。同一组合不得重复发布，避免合计重复出现；合计大于实到上限等不存在整数方案的情况同样拒发。
+
+状态机为 `pending 待检 → publishing 公开中 → published 已公开`，另有 `withdrawn 已撤下`。创建只在检查通过时落账待检包；**发布时**在快照行锁内按最新历史重新联审，因此检查后新增的公开合计或并发发布都会让旧检查失效并重新判定。重试幂等：同一发布重复调用只记账一次；发布分两段提交，中断后由启动恢复或下一次发布补完，公开中的冻结合计已计入历史披露，避免并发窗口。撤下只从公开页移除，明细仍计入历史披露。
+
+公开接口 `/publications/public` 与公开下载只返回通过检查的组合名称和合计，隐藏班级明细、范围与诊断；台账与检查详情仅 admin 可见。公开包不影响原快照签核字段。自检脚本：`python -m scripts.verify_disclosure` 无需数据库，复跑整数范围穷举对照与业务规则；`python -m scripts.verify_publication` 用内存 sqlite 走完预检/待检/发布/重新联审/撤下/恢复，需要本机额外安装 `httpx`（FastAPI TestClient 依赖）。
 
 ## 工程、本地开发与范围
 
@@ -61,4 +73,4 @@ backend等待db/redis健康，worker再等backend，frontend等backend；恰好�
 
 目录按backend/src的routes/controllers/services/models/schemas/middlewares/config/utils及frontend/src的api/stores/pages/components/hooks/utils/constants/types/router拆分。共享表格、字段、状态标签；表单hooks与HTML转义；请求ID/安全头中间件、业务审计和全局错误处理。枚举ROLES/STATES/MODES/APPROVALS/FIELDS位于后端constants/enums.py、schemas/business.py和前端constants/enums.js。ORM建初表，migrations/001_initial.sql保留实际DDL；无在线版本迁移执行器。
 
-小型范围：逐条表单/API录入，无Excel批导、删除、分页或跨指标引用；单worker，启动恢复待处理任务。班级日事实是人次，不能解释为去重学员留存。签核只在站内，不外发邮件/电子签章。Google Fonts依赖网络，离线回退serif/sans-serif。测试证据在 `../../test-artifacts/gb-3111/TESTING.md`，源码无截图/日志。MIT License见LICENSE。
+小型范围：逐条表单/API录入，无Excel批导、删除、分页或跨指标引用；单worker，启动恢复待处理任务。班级日事实是人次，不能解释为去重学员留存。签核只在站内，不外发邮件/电子签章；公开发布台账同样只在站内，不推送外部渠道。Google Fonts依赖网络，离线回退serif/sans-serif。测试证据在 `../../test-artifacts/gb-3111/TESTING.md`，源码无截图/日志。MIT License见LICENSE。

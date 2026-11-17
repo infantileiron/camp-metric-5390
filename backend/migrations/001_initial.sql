@@ -316,6 +316,158 @@ ALTER TABLE ONLY public.snapshots
 
 
 --
+-- Name: publications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.publications (
+    id integer NOT NULL,
+    snapshot_id integer NOT NULL,
+    state character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    note text,
+    combos json NOT NULL,
+    check_result json,
+    check_history_fingerprint character varying(64) DEFAULT ''::character varying,
+    check_package_fingerprint character varying(64) DEFAULT ''::character varying,
+    checked_at character varying(40) DEFAULT ''::character varying,
+    checked_by character varying(100) DEFAULT ''::character varying,
+    created character varying(40) DEFAULT ''::character varying,
+    created_by character varying(100) DEFAULT ''::character varying,
+    published_at character varying(40) DEFAULT ''::character varying,
+    published_by character varying(100) DEFAULT ''::character varying,
+    withdrawn_at character varying(40) DEFAULT ''::character varying,
+    withdrawn_by character varying(100) DEFAULT ''::character varying,
+    idempotency_key character varying(100),
+    revision integer DEFAULT 1 NOT NULL
+);
+
+
+--
+-- Name: publications_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.publications_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: publications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.publications_id_seq OWNED BY public.publications.id;
+
+
+--
+-- Name: publication_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.publication_items (
+    id integer NOT NULL,
+    publication_id integer NOT NULL,
+    snapshot_id integer NOT NULL,
+    combo_key character varying(1000) NOT NULL,
+    label character varying(100) NOT NULL,
+    class_codes json NOT NULL,
+    total_completed integer NOT NULL,
+    created character varying(40) DEFAULT ''::character varying
+);
+
+
+--
+-- Name: publication_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.publication_items_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: publication_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.publication_items_id_seq OWNED BY public.publication_items.id;
+
+
+--
+-- Name: publications id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publications ALTER COLUMN id SET DEFAULT nextval('public.publications_id_seq'::regclass);
+
+
+--
+-- Name: publication_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publication_items ALTER COLUMN id SET DEFAULT nextval('public.publication_items_id_seq'::regclass);
+
+
+--
+-- Name: publication_items publication_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publication_items
+    ADD CONSTRAINT publication_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: publications publications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publications
+    ADD CONSTRAINT publications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: publication_items publication_items_snapshot_id_combo_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publication_items
+    ADD CONSTRAINT publication_items_snapshot_id_combo_key_key UNIQUE (snapshot_id, combo_key);
+
+
+--
+-- Name: publications publications_snapshot_id_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publications
+    ADD CONSTRAINT publications_snapshot_id_idempotency_key_key UNIQUE (snapshot_id, idempotency_key);
+
+
+--
+-- Name: publications publications_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publications
+    ADD CONSTRAINT publications_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES public.snapshots(id);
+
+
+--
+-- Name: publication_items publication_items_publication_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publication_items
+    ADD CONSTRAINT publication_items_publication_id_fkey FOREIGN KEY (publication_id) REFERENCES public.publications(id);
+
+
+--
+-- Name: publication_items publication_items_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publication_items
+    ADD CONSTRAINT publication_items_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES public.snapshots(id);
+
+
+--
 -- PostgreSQL database dump complete
 --
 

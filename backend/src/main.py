@@ -14,6 +14,11 @@ async def lifespan(app):
    from scripts.seed_demo import seed
    seed()
   except Exception:logging.exception('seed failed')
+ try:
+  from src.config.database import Session
+  from src.services.publication import recover_all
+  with Session() as s:recover_all(s)
+ except Exception:logging.exception('publication recovery failed')
  yield
 app=FastAPI(title='训练营指标口径签核',lifespan=lifespan)
 app.add_middleware(RequestId);app.add_middleware(SecurityHeaders)

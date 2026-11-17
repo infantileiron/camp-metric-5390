@@ -4,10 +4,12 @@ import redis
 from src.config.database import Session
 from src.models.entities import Snapshot
 from src.services.analysis import calculate
+from src.services.publication import recover_all
 r=redis.Redis.from_url(os.environ['REDIS_URL'])
 with Session() as recovery:
  for pending in recovery.query(Snapshot).filter(Snapshot.state.in_(['queued','running'])).all():
   pending.state='queued';r.rpush('camp:snapshots',pending.id)
+ recover_all(recovery)
  recovery.commit()
 while True:
  Path('/tmp/heartbeat').touch()

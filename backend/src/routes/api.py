@@ -1,13 +1,14 @@
 import os,json
 import redis
-from fastapi import APIRouter,Depends,HTTPException,Response
+from fastapi import APIRouter,Body,Depends,HTTPException,Response
 from src.config.database import db
-from src.models.entities import User,Metric,Fact,Snapshot,Audit
-from src.schemas.business import Login,MetricInput,FactInput,RunInput,NoteInput
+from src.models.entities import User,Metric,Fact,Snapshot,Audit,Publication
+from src.schemas.business import Login,MetricInput,FactInput,RunInput,NoteInput,PublicationInput,PublishInput
 from src.middlewares.auth import current,editor,admin
 from src.utils.security import verify,token
 from src.services.business import audit,dump
 from src.services.repository import save_metric,save_fact
+from src.services import publication as publishing
 from src.controllers import business as ensure
 router=APIRouter()
 @router.post('/auth/login')
@@ -72,3 +73,43 @@ def export(i:int,u=Depends(current),s=Depends(db)):
  return Response(json.dumps(dump(r),ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':f'attachment; filename="camp-metric-{i}.json"'})
 @router.get('/audits')
 def audits(u=Depends(admin),s=Depends(db)):return [dump(r) for r in s.query(Audit).order_by(Audit.id.desc()).limit(100)]
+
+
+def _publication(s,i):return s.get(Publication,i)
+def _require_publication(s,i):
+ r=_publication(s,i)
+ if not r:raise HTTPException(404,'发布台账不存在')
+ return r
+def _combos(data):return [dict(label=c.label,class_codes=c.class_codes) for c in data.combos]
+@router.get('/publications')
+def publication_ledger(u=Depends(admin),s=Depends(db)):return [publishing.ledger_row(r) for r in s.query(Publication).order_by(Publication.id.desc()).all()]
+@router.get('/publications/public')
+def publication_public(u=Depends(current),s=Depends(db)):return publishing.public_list(s)
+@router.get('/publications/{i}')
+def publication_detail(i:int,u=Depends(admin),s=Depends(db)):return publishing.detail_payload(_require_publication(s,i))
+@router.get('/publications/{i}/export')
+def publication_export(i:int,u=Depends(current),s=Depends(db)):
+ r=_require_publication(s,i)
+ if r.state!='published':raise HTTPException(409,'仅已公开的发布可以下载')
+ body=publishing.public_payload(r)
+ return Response(json.dumps(body,ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':f'attachment; filename="camp-publication-{i}.json"'})
+@router.post('/snapshots/{i}/publications/precheck')
+def publication_precheck(i:int,data:PublicationInput,u=Depends(admin),s=Depends(db)):
+ r=ensure.snapshot(s,i);publishing.checked_snapshot(s,i)
+ return publishing.precheck(s,r,_combos(data))
+@router.post('/snapshots/{i}/publications')
+def publication_create(i:int,data:PublicationInput,u=Depends(admin),s=Depends(db)):
+ publishing.checked_snapshot(s,i);r,fresh=publishing.create(s,s.get(Snapshot,i),_combos(data),u,data.idempotency_key)
+ if fresh:audit(s,u,'建立发布待检 '+str(r.id))
+ return publishing.detail_payload(r)
+@router.post('/publications/{i}/publish')
+def publication_publish(i:int,data:PublishInput=Body(default=PublishInput()),u=Depends(admin),s=Depends(db)):
+ r=_require_publication(s,i)
+ if data.idempotency_key:
+  if r.idempotency_key!=data.idempotency_key:raise HTTPException(409,'发布幂等键与待检包不一致')
+ r,fresh=publishing.publish(s,r,u)
+ if fresh:audit(s,u,'公开发布 '+str(i))
+ return publishing.detail_payload(_require_publication(s,i))
+@router.post('/publications/{i}/withdraw')
+def publication_withdraw(i:int,u=Depends(admin),s=Depends(db)):
+ r=publishing.withdraw(s,_require_publication(s,i),u);audit(s,u,'撤下发布 '+str(i));return publishing.detail_payload(r)
